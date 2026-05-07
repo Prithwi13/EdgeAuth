@@ -9,7 +9,7 @@
 [![Accuracy](https://img.shields.io/badge/Val%20Acc-97.42%25-brightgreen.svg)]()
 [![AUC](https://img.shields.io/badge/AUC-0.978-brightgreen.svg)]()
 
-Diffusion models now generate synthetic images that fool human observers nearly as often as real ones. **EdgeAuth** is a four-stage cascade architecture for authenticating AI-generated images **entirely on-device** — no cloud, no privacy exposure, no latency.
+Diffusion models now generate synthetic images that fool human observers nearly as often as real ones. **EdgeAuth** is a four-stage cascade architecture for authenticating AI-generated images **entirely on-device** and requires no cloud, no privacy exposure, no latency.
 
 ---
 
