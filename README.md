@@ -6,10 +6,10 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Dataset](https://img.shields.io/badge/Dataset-CIFAKE-orange.svg)](https://www.kaggle.com/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images)
-[![Accuracy](https://img.shields.io/badge/Val%20Acc-97.42%25-brightgreen.svg)]()
-[![AUC](https://img.shields.io/badge/AUC-0.978-brightgreen.svg)]()
+[![Accuracy](https://img.shields.io/badge/Val%20Acc-96.47%25-brightgreen.svg)]()
+[![AUC](https://img.shields.io/badge/AUC-0.9943-brightgreen.svg)]()
 
-Diffusion models now generate synthetic images that fool human observers nearly as often as real ones. **EdgeAuth** is a four-stage cascade architecture for authenticating AI-generated images **entirely on-device** and requires no cloud, no privacy exposure, no latency.
+**EdgeAuth** is a three-stage cascade for detecting AI-generated images with local, resource-aware inference. A lightweight pre-filter handles easy cases, a hybrid CNN-Vision Transformer analyzes harder images, and a calibrated guard can return an uncertain result instead of forcing a label.
 
 ---
 
@@ -17,38 +17,39 @@ Diffusion models now generate synthetic images that fool human observers nearly 
 
 | Metric | Value |
 |---|---|
-| Validation Accuracy (Hybrid CNN-ViT) | **97.42%** |
-| AUC-ROC | **0.978** |
-| Improvement over ResNet-50 baseline | **+8.90 pp** |
-| Trainable parameters | **0.72M / 95.4M (0.76%)** |
-| FastPath throughput | **47.1% of traffic** |
-| Expected Calibration Error (ECE) | **0.0183** |
-| Full cascade decisive accuracy | **96.21%** |
+| Validation Accuracy (Hybrid CNN-ViT) | **96.47%** |
+| AUC-ROC | **0.9943** |
+| Improvement over ResNet-50 baseline | **+6.52 pp** |
+| Trainable parameters | **0.71M / 95.1M (0.7%)** |
+| FastPath exits | **47.4% of traffic** |
+| Expected Calibration Error (ECE) | **0.0067** |
+| Full cascade accuracy on decisive cases | **98.07%** |
+| Uncertain rate | **6.57%** |
 
 ---
 
 ## 🏗️ Architecture
 
-EdgeAuth is a **four-stage cascade** that routes images through progressively more expensive components only when needed:
+EdgeAuth is a **three-stage cascade** that routes images through progressively more expensive components only when needed:
 
 ```
 Input Image
     │
     ▼
 ┌─────────────────────────────┐
-│  Stage 1: FastPath (128px)  │  ← MobileNet-style CNN, 3.21M params
-│  score < 0.20 → Exit: REAL  │    47.1% of traffic exits here
+│  Stage 1: FastPath (128px)  │  ← MobileNet-style CNN, 2.67M params
+│  score < 0.20 → Exit: REAL  │    47.4% of traffic exits here
 └────────────┬────────────────┘
-             │ (remaining 52.9%)
+             │ (remaining 52.6%)
              ▼
 ┌────────────────────────────────────────┐
 │  Stage 2: Hybrid CNN-ViT (192px)       │  ← ResNet-50 stem (frozen, stages 1-3)
 │  score < 0.35 → Exit: REAL            │      + 12-layer ViT with LoRA (r=16)
-└────────────┬───────────────────────────┘    30.6% of traffic exits here
-             │ (remaining 22.3%)
+└────────────┬───────────────────────────┘    2.7% of traffic exits here
+             │ (remaining 49.9%)
              ▼
 ┌───────────────────────────────┐
-│  Stage 3: Guard MLP           │  ← 3-layer MLP, 71.4K params
+│  Stage 3: Guard MLP           │  ← 3-layer MLP, 26.1K params
 │  G(x) → FAKE or UNCERTAIN    │    DPO-aligned for asymmetric cost modeling
 └───────────────────────────────┘
 ```
@@ -59,7 +60,7 @@ Input Image
 - ResNet-50 convolutional stem (stages 1–3, frozen) extracts a `1024×12×12` feature map
 - Features are linearly projected to 768-d tokens and processed by 12 pre-LayerNorm transformer blocks
 - LoRA adapters (rank=16, alpha=32) applied to Q and V projections in all attention layers
-- Only **0.76%** of parameters are updated during training
+- Only **0.7%** of parameters are updated during training
 
 **Guard MLP**
 - Predicts backbone correctness from 4 scalar features: `score`, `conf`, `var_mean`, `max_norm`
@@ -79,24 +80,13 @@ Input Image
 
 | Component | Val Acc | AUC | Params | Trainable |
 |---|---|---|---|---|
-| Baseline: ResNet-50 + LogReg | 88.52% | 0.892 | 25.5M | ~2K |
-| FastPath CNN (128px) | 93.10% | 0.951 | 3.21M | 3.21M |
-| **Hybrid CNN-ViT (LoRA r=16)** | **97.42%** | **0.978** | 95.4M | **0.72M** |
-| Guard MLP (post-DPO) | 92.10%* | — | 71.4K | 71.4K |
-| Full Cascade (decisive) | 96.21% | — | ~99M | — |
+| Baseline: ResNet-50 + LogReg | 89.95% | 0.9638 | 25.5M | ~2K |
+| FastPath CNN (128px) | 95.62% | — | 2.67M | 2.67M |
+| **Hybrid CNN-ViT (LoRA r=16)** | **96.47%** | **0.9943** | 95.1M | **0.71M** |
+| Guard MLP (post-DPO) | 91.07%* | — | 26.1K | 26.1K |
+| Full Cascade (decisive) | 98.07% | — | — | — |
 
-*Guard accuracy measures correctness-prediction (recall = 91.3%, FPR = 8.7%)
-
-### LoRA Rank Ablation
-
-| Configuration | Trainable Params | Val Acc |
-|---|---|---|
-| Full fine-tune | 95.4M | 97.21% |
-| LoRA r=8 | 0.38M | 96.58% |
-| **LoRA r=16 (EdgeAuth)** | **0.72M** | **97.42%** |
-| LoRA r=32 | 1.42M | 97.39% |
-
-LoRA r=16 beats full fine-tuning — the low-rank constraint acts as implicit regularization.
+*Guard accuracy measures correctness prediction (recall = 91.7%, false-positive rate = 25.8%). The full cascade reports an additional 6.57% of samples as uncertain.
 
 ---
 
@@ -107,7 +97,7 @@ Frequency-domain analysis of CIFAKE reveals that AI-generated images imprint **s
 - **Local** → captured by convolutional weight-sharing
 - **Global** → their co-occurrence across the image requires transformer self-attention
 
-A hand-crafted high-frequency energy ratio achieves AUC = 0.623 with zero parameters, confirming the signal is real but not trivially separable. The Hybrid CNN-ViT is therefore architecturally motivated by the signal structure, not arbitrary paradigm stacking.
+A hand-crafted high-frequency energy ratio achieves AUC = 0.542 with zero parameters. That weak baseline suggests frequency information exists but is not sufficient by itself; the hybrid model learns a broader combination of local and global cues.
 
 ---
 
@@ -195,9 +185,9 @@ CIFAKE images are natively 32×32 and are upsampled to avoid exploiting JPEG met
 
 | Stage | Condition | Action | Traffic |
 |---|---|---|---|
-| Stage 1 – FastPath | score < 0.20 | Exit: REAL | 47.1% |
-| Stage 2 – Hybrid ViT | score < 0.35 | Exit: REAL | 30.6% |
-| Stage 3 – Guard MLP | G(x) = REPORT | Emit: FAKE / UNCERTAIN | 22.3% |
+| Stage 1 – FastPath | score < 0.20 | Exit: REAL | 47.4% |
+| Stage 2 – Hybrid ViT | score < 0.35 | Exit: REAL | 2.7% |
+| Stage 3 – Guard MLP | G(x) = REPORT | Emit: FAKE / UNCERTAIN | 49.9% |
 
 ---
 
